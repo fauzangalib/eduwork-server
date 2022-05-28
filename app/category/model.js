@@ -11,4 +11,4 @@ let categorySchema = Schema({
     }
 });
 
-module.exports = model('Product', categorySchema);
+module.exports = model('Category', categorySchema);
