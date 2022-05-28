@@ -1,20 +1,82 @@
-const Categories = require('./model')
+const path = require('path');
+const fs = require('fs');
+const config = require('../config');
+const Product = require('./model');
+const Category = require('../category/model')
+const Tag = require('../tag/model')
 
-const store = async(req, res, next) => {
+const store = async (req, res, next) => {
     try{
         let payload = req.body;
-        let category = new Categories(payload);
-        await category.save();
-        return res.json(category);
+
+        if(payload.category){
+            let category = 
+            await Category
+            .findOne({name: {$regex: payload.category, $options: 'i'}});
+        if(category){
+            payload = {...payload, category: category._id};
+        }else {
+            delete payload.category;
+        }
+
+    }
+
+    if(payload.tags && payload.tags.length > 0){
+        let tags = 
+        await Tag
+        .find({name: {$in: payload.tags}});
+    if(tags.length){
+        payload = {...payload, tags: tags.map(tag => tag._id)};
+    }else {
+        delete payload.tags;
+    }
+
+}
+        if(req.file){
+            let tmp_path = req.file.path;
+            let originalExt = req.file.originalname.split('.')[req.file.originalname.split('.').length - 1];
+            let filename = req.file.filename + '.' + originalExt;
+            let target_path = path.resolve(config.rootPath, `public/images/products/${filename}`);
+
+            const src = fs.createReadStream(tmp_path);
+            const dest = fs.createWriteStream(target_path);
+            src.pipe(dest);
+
+            src.on('end', async () => {
+                try {
+                    let product = new Product({...payload, image_url: filename})
+                    await product.save()
+                    return res.json(product);
+
+                } catch(err) {
+                    fs.unlinkSync(target_path);
+                    if(err && err.name === 'VadilationError'){
+                        return res.json({
+                            error: 1,
+                            message: err.message,
+                            fields: err.errors
+                        })
+                    }
+                    next(err);
+                }
+            });
+            src.on('error', async () =>{
+                next(err);
+            });
+        } else {
+
+            let product = new Product(payload);
+            await product.save();
+            return res.json(product);
+        }
     } catch(err) {
-        if(err && err.name === 'ValidationError') {
-            return res.json({
+        if(err && err.name === 'VadilationError') {
+            return res.json ({
                 error: 1,
                 message: err.message,
                 fields: err.errors
             });
         }
-
         next(err);
     }
 }
@@ -22,28 +84,80 @@ const store = async(req, res, next) => {
 const update = async (req, res, next) => {
     try{
         let payload = req.body;
-        let category = await Categories.findByIdAndUpdate(req.params.id, payload, {new: true, runValidators: true});
-        return res.json(category);
-    }catch(err) {
-        if(err && err.name === 'ValidationError') {
-            return res.json({
-                error: 1, 
-                message: err.message,
-                fields: err.errors
-            });
-        }
-        next(err);
-    }
-}
+        let {id} = req.params;
 
-const destroy = async (req, res, next) => {
-    try{
-        let category = await Categories.findByIdAndDelete(req.params.id);
-        return res.json(category);
-    }catch(err) {
-        if(err && err.name === 'ValidationError') {
-            return res.json({
-                error: 1, 
+        if(payload.category){
+            let category = 
+            await Category
+            .findOne({name: {$regex: payload.category, $options: 'i'}});
+        if(category){
+            payload = {...payload, category: category._id};
+        }else {
+            delete payload.category;
+        }
+
+    }
+    if(payload.tags && payload.tags.length > 0){
+        let tags = 
+        await Tag
+        .find({name: {$in: payload.tags}});
+    if(tags.length){
+        payload = {...payload, tags: tags.map(tag => tag._id)};
+    }else {
+        delete payload.tags;
+    }
+
+}
+        if(req.file){
+            let tmp_path = req.file.path;
+            let originalExt = req.file.originalname.split('.')[req.file.originalname.split('.').length - 1];
+            let filename = req.file.filename + '.' + originalExt;
+            let target_path = path.resolve(config.rootPath, `public/images/products/${filename}`);
+
+            const src = fs.createReadStream(tmp_path);
+            const dest = fs.createWriteStream(target_path);
+            src.pipe(dest);
+
+            src.on('end', async () => {
+                try {
+                    let product = await Product.findById(id);
+                    let currentImage = `${config.rootPath}/public/images/products/${product.image_url}`;
+                    if(fs.existsSync(currentImage)) {
+                        fs.unlinkSync(currentImage);
+                    }
+                    product = await Product.findByIdAndUpdate(id, payload, {
+                        new: true,
+                        runValidators: true
+                    });
+                    return res.json(product);
+
+                } catch(err) {
+                    fs.unlinkSync(target_path);
+                    if(err && err.name === 'VadilationError'){
+                        return res.json({
+                            error: 1,
+                            message: err.message,
+                            fields: err.errors
+                        })
+                    }
+                    next(err);
+                }
+            });
+            src.on('error', async () =>{
+                next(err);
+            });
+        } else {
+
+            let product = await Product.findByIdAndUpdate(id, payload, {
+                new: true,
+                runValidators: true
+            });
+            return res.json(product);
+        }
+    } catch(err) {
+        if(err && err.name === 'VadilationError') {
+            return res.json ({
+                error: 1,
                 message: err.message,
                 fields: err.errors
             });
@@ -54,22 +168,36 @@ const destroy = async (req, res, next) => {
 
 const index = async (req, res, next) => {
     try{
-        let category = await Categories.find();
-        return res.json(category);
-    }catch(err) {
-        if(err && err.name === 'ValidationError') {
-            return res.json({
-                error: 1, 
-                message: err.message,
-                fields: err.errors
-            });
+        let { skip = 0, limit = 10} = req.query;
+        let product = await Product
+        .find()
+        .skip(parseInt(skip))
+        .limit(parseInt(limit))
+        .populate('category')
+        .populate('tags');
+        return res.json(product);
+    } catch (err) {
+        next(err);
+    }
+}
+
+const destroy = async (req, res, next) => {
+    try {
+        let product = await Product.findByIdAndDelete(req.params.id);
+
+        let currentImage = `${config.rootPath}/public/images/products/${product.image_url}`;
+
+        if(fs.existsSync(currentImage)) {
+            fs.unlinkSync(currentImage)
         }
+        return res.json(product);
+    } catch(err) {
         next(err);
     }
 }
 module.exports = {
     store,
+    index,
     update,
-    destroy,
-    index
+    destroy
 }
